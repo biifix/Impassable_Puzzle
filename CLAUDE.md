@@ -46,6 +46,10 @@ make runmanual
 make runtests
 ```
 
+**Test Puzzles:**
+- `capability1-13`: Solvable puzzles of increasing difficulty (13 puzzles)
+- `impassable1-3`: Unsolvable puzzles (3 puzzles)
+
 ## Architecture
 
 ### Game State Structure (`gate_t` in include/gate.h)
@@ -73,10 +77,12 @@ The core game state is represented by the `gate_t` struct:
 
 **AI solver (`src/ai/`):**
 - `ai.c`: Main solver entry point with `solve()` function
-  - Implements three algorithms (to be filled in):
-    1. Algorithm 1: Width n+1 search
-    2. Algorithm 2: Memory-optimized variant
-    3. Algorithm 3: Multiple radix tree approach
+  - Implements three algorithms:
+    1. Algorithm 1: BFS without duplicate detection (IW(n+1))
+    2. Algorithm 2: BFS with radix tree duplicate detection (IW(n))
+    3. Algorithm 3: Iterative Width with multi-tree novelty pruning
+- `queue.c/.h`: Queue implementation for BFS (linked list based)
+  - `applyAction()`: Core function that generates successor states
 - `radix.c/.h`: Radix tree for state deduplication (bit-packed)
 - `hashtable.c/.h`: Hash table implementation (from goldsborough/hashtable)
 - `utils.c/.h`: Timing utilities (`now()` function)
@@ -114,18 +120,33 @@ These should be built from their corresponding `.c` files before linking.
 **Dependencies:**
 - ncurses library (`-lncurses` flag required)
 - Standard C libraries
+- **Compiler**: Uses `gcc-15` specifically (see Makefile line 9)
 
-### AI Solver Implementation Areas
+### AI Solver Implementation
 
-The `find_solution()` function in `src/ai/ai.c` has three marked sections to implement:
-1. **Lines 98-99**: Core IW(w) search algorithm
-2. **Lines 110-115**: Memory usage calculation (commented)
-3. **Lines 120-122**: Empty space counting for solution validation
+**Switching Algorithms:**
+The `find_solution()` function in `src/ai/ai.c:665-668` controls which algorithm runs. Comment/uncomment to switch:
+```c
+void find_solution(gate_t* init_data) {
+    // algo1(init_data);  // BFS without duplicate detection
+    algo2(init_data);     // BFS with radix tree duplicate detection
+    // algo3(init_data);  // IW with multi-tree novelty pruning
+}
+```
 
-Key functions to implement:
-- `duplicate_state()`: Deep copy gate_t including dynamic allocations
-- `free_state()`: Free state-specific memory (map, solution string)
-- `free_initial_state()`: Free unchanging initial data (buffer, map_save)
+**Three Implemented Algorithms:**
+1. **algo1** (lines 186-316): Breadth-First Search without duplicate detection (IW(n+1))
+2. **algo2** (lines 321-475): BFS with single radix tree for duplicate detection (IW(n))
+3. **algo3** (lines 480-659): Iterative Width search with multiple radix trees for novelty pruning
+
+**Key AI Components:**
+- `duplicate_state()` (ai.c:41-94): Deep copies gate_t including all dynamic allocations
+- `free_state()` (ai.c:100-139): Frees state-specific memory (map, solution string)
+- `free_initial_state()` (ai.c:141-181): Frees unchanging initial data (buffer, map_save)
+- `applyAction()` (queue.c): Generates successor states by applying piece movements
+- `winning_state()` (ai.c:722-731): Checks if all goals are covered
+- `packMap()` (ai.c:686-717): Bit-packs state for radix tree storage
+- `getPackedSize()` (ai.c:674-681): Calculates bytes needed for bit-packed state
 
 ### Puzzle File Format
 
@@ -148,3 +169,97 @@ Example (`test_puzzles/capability1`):
 - `H-Q`: Goal pieces (placed pieces complete the level)
 - `0-9`: Movable pieces
 - Space: Empty walkable space
+
+## Using Gemini CLI for Large Codebase Analysis
+
+When Claude's context window is insufficient for analyzing large codebases, use the Gemini CLI (`gemini -p`) to leverage Google Gemini's massive context capacity.
+
+### When to Use Gemini CLI vs Claude
+
+**Use Gemini CLI for:**
+- Entire codebase analysis (>100KB of files)
+- Project-wide pattern detection
+- Architecture overview across multiple directories
+- Verification of feature implementation across many files
+- Questions requiring full repository context
+
+**Continue using Claude for:**
+- Single file analysis or small file sets
+- Writing/editing code
+- Detailed explanations and tutorials
+- Interactive debugging
+- General programming questions
+
+### Basic Syntax
+
+Use `@` to include files/directories (paths relative to where you run the command):
+```bash
+# Single file
+gemini -p "@src/ai/ai.c Explain the three algorithm implementations"
+
+# Multiple files
+gemini -p "@include/gate.h @src/ai/ai.c Analyze the AI data structures"
+
+# Directory
+gemini -p "@src/ai/ Summarize the solver architecture"
+
+# Multiple directories
+gemini -p "@src/ @include/ Explain the overall project structure"
+
+# Entire project
+gemini -p "@./ Overview of this Impassable Gate solver"
+# Or equivalently:
+gemini --all_files -p "Analyze project structure"
+```
+
+### Implementation Verification Queries
+
+**Feature Detection:**
+```bash
+# Check algorithm completeness
+gemini -p "@src/ai/ Are all three algorithms (algo1, algo2, algo3) fully implemented?"
+
+# Verify memory management
+gemini -p "@src/ai/ai.c Is proper cleanup implemented? Check malloc/free pairs"
+
+# Find specific patterns
+gemini -p "@src/ List all functions that modify the game state"
+```
+
+**Performance & Optimization:**
+```bash
+# Check bit-packing
+gemini -p "@src/ai/ Explain how state bit-packing works across all algorithms"
+
+# Radix tree usage
+gemini -p "@src/ai/ How is the radix tree used differently in algo2 vs algo3?"
+
+# Memory efficiency
+gemini -p "@src/ai/ Compare memory usage between the three algorithms"
+```
+
+### Best Practices
+
+1. **Be specific in queries** - Vague questions on large codebases yield vague answers
+2. **Use directory scoping** - Don't include unnecessary directories
+3. **Combine with Claude** - Use Gemini for discovery, Claude for implementation
+4. **Path awareness** - Always run from project root for consistent paths
+
+### Example Workflow
+
+1. **Discovery Phase** (Gemini):
+```bash
+   gemini -p "@src/ai/ Explain the differences between algo1, algo2, and algo3"
+```
+
+2. **Implementation Phase** (Claude):
+   - Take Gemini's findings back to Claude
+   - Focus on specific files identified
+   - Write/modify code with Claude's assistance
+
+### Important Notes
+
+- No `--yolo` flag needed for read-only analysis
+- Gemini includes file contents directly in context
+- Results are best when queries are specific and focused
+- Consider breaking very large projects into logical segments
